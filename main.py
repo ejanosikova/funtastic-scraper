@@ -5,112 +5,154 @@ import random
 from bs4 import BeautifulSoup
 import requests
 import csv
+import json
 
-base_url = "https://www.funtastic.sk"
-chrome_options = webdriver.ChromeOptions()
-chrome_options.add_experimental_option("detach", True)
-driver = webdriver.Chrome(options=chrome_options)
 
-driver.get(base_url)
-driver.maximize_window()
-sleep(5)
+class FuntasticScraper:
+    def __init__(self):
+        self.base_url = "https://www.funtastic.sk"
+        self.products_links = []
+        self.driver = self.create_driver()
+        self.data_to_save = []
 
-decline_cookies = driver.find_element(By.ID, "cookies-notify__disagree")
-if decline_cookies:
-    decline_cookies.click()
-sleep(3.26)
+    def create_driver(self):
+        chrome_options = webdriver.ChromeOptions()
+        chrome_options.add_experimental_option("detach", True)
+        chrome_options.add_argument("--headless")
+        return webdriver.Chrome(options=chrome_options)
 
-# categories = ["KNIHY", "KOMIKSY", "MANGA V ČEŠTINE"]
-categories = ["MANGA V ČEŠTINE"]
+    def get_all_categories(self):
+        categories = []
+        soup = BeautifulSoup(self.driver.page_source, 'html.parser')
+        menu_tag = soup.find('ul', {'class': 'menu-root'})
+        category_tags = menu_tag.findAll('li', {'class': 'eshop-menu-item'})
+        for category in category_tags:
+            category_name = category.find("a").text.replace(
+                    '\n', "").replace(
+                    '(', "").replace(
+                    ')', "").strip()
+            categories.append(category_name)
+        return categories
 
-products_links = []
+    def get_wanted_categories(self):
+        with open("config.json", "r") as jsonfile:
+            config_data = json.load(jsonfile)
+        wanted_categories = config_data["wanted_categories"]
+        if not wanted_categories:
+            wanted_categories = self.get_all_categories()
+        print(f"Wanted categories: {wanted_categories}")
+        return wanted_categories
 
-for category in categories:
+    def load_website(self):
+        self.driver.get(self.base_url)
+        self.driver.maximize_window()
+        sleep(5)
+        decline_cookies = self.driver.find_element(By.ID, "cookies-notify__disagree")
+        if decline_cookies:
+            decline_cookies.click()
+        sleep(3.26)
 
-    category_tag = driver.find_element(By.LINK_TEXT, category)
-    category_tag.click()
-    sleep(random.uniform(4, 5))
-
-    pages_range_tag = driver.find_elements(By.CLASS_NAME, "number")
-    page_range = max([int(page.text) for page in pages_range_tag])
-
-    soup = BeautifulSoup(driver.page_source, 'html.parser')
-
-    products_list = soup.findAll('div', {'class': 'img_box'})
-    for product in products_list:
-        link = product.find("a")['href']
-        products_links.append(base_url + link)
-
-    for i in range(1, page_range):
-        page_number = i + 1
-        next_page = driver.find_element(By.LINK_TEXT, f"{page_number}")
-        sleep(random.uniform(4, 5))
-        next_page.click()
-        sleep(random.uniform(2, 4))
-
-        soup = BeautifulSoup(driver.page_source, 'html.parser')
+    def get_products_links(self):
+        soup = BeautifulSoup(self.driver.page_source, 'html.parser')
 
         products_list = soup.findAll('div', {'class': 'img_box'})
         for product in products_list:
             link = product.find("a")['href']
-            products_links.append(base_url + link)
+            self.products_links.append(self.base_url + link)
 
-driver.quit()
+    def get_products(self):
+        categories = self.get_wanted_categories()  # e.g. ["KNIHY", "KOMIKSY", "MANGA V ČEŠTINE"] or [] for all categories
+        for category in categories:
+            print(f"Current category: {category}")
+            category_tag = self.driver.find_element(By.LINK_TEXT, category)
+            category_tag.click()
+            sleep(random.uniform(4, 5))
 
-data_to_save = []
-print(len(products_links))
-for product_link in products_links:
-    print(product_link)
-    f = requests.get(product_link)
-    hun = BeautifulSoup(f.content, 'html.parser')
-    try:
-        MOC = float(
-            hun.find('span', {'class': 'price-normal'}).text.replace('\n', "").strip().strip('€').replace(',', '.'))
-    except:
-        MOC = None
-    describ = hun.find("div", {"id": "wherei"}).findAll("a")
-    category_level = []
-    for i, des in enumerate(describ):
-        category_level.append({"Category{}".format(i): "{}".format(des.text.replace('\n', "").strip())})
-    Category0 = None
-    Category1 = None
-    Category2 = None
-    Category3 = None
-    Category4 = None
-    for cat in category_level:
-        key, value = cat.popitem()
-        if key == 'Category0':
-            Category0 = value
-        if key == 'Category1':
-            Category1 = value
-        if key == 'Category2':
-            Category2 = value
-        if key == 'Category3':
-            Category3 = value
-        if key == 'Category4':
-            Category4 = value
-    data_to_save.append({
-        "URL": product_link,
-        "Title": hun.find("div", {"id": "wherei"}).find("span", {"class": "active"}).text.replace('\n',
-                                                                                                  "").strip(),
-        "ISBN": hun.find("td", {"class": "prices product-eancode-value"}).find("span",
-                                                                               {"class": "fleft"}).text.replace(
-            '\n', "").strip(),
-        "MOC": MOC,
-        "Price": float(
-            hun.find('span', {'class': 'price-value'}).text.replace('\n', "").strip().strip('€').replace(',',
-                                                                                                         '.')),
-        "Category0": Category0,
-        "Category1": Category1,
-        "Category2": Category2,
-        "Category3": Category3,
-        "Category4": Category4
-    })
+            pages_range_tag = self.driver.find_elements(By.CLASS_NAME, "number")
+            try:
+                page_range = max([int(page.text) for page in pages_range_tag])
+            except ValueError:
+                print("Category is empty")
+            else:
+                self.get_products_links()
 
-    fieldnames = ["URL", "Title", "ISBN", "MOC", "Price", "Category0", "Category1", "Category2", "Category3",
-                  "Category4"]
+                for i in range(1, page_range):
+                    page_number = i + 1
+                    next_page = self.driver.find_element(By.LINK_TEXT, f"{page_number}")
+                    sleep(random.uniform(4, 5))
+                    next_page.click()
+                    sleep(random.uniform(2, 4))
+                    self.get_products_links()
 
-    with open('books.csv', 'w') as csvfile:
-        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(data_to_save)
+        self.driver.quit()
+
+    def get_products_data(self):
+        products_number = len(self.products_links)
+        for i, product_link in enumerate(self.products_links):
+            print(f"{i}/{products_number} - {product_link}")
+            f = requests.get(product_link)
+            soup = BeautifulSoup(f.content, 'html.parser')
+            try:
+                isbn = soup.find("td", {"class": "prices product-eancode-value"}).find("span",
+                                                                                       {
+                                                                                           "class": "fleft"}).text.replace(
+                    '\n', "").strip()
+            except AttributeError:
+                isbn = None
+            try:
+                price_normal = float(
+                    soup.find('span', {'class': 'price-normal'}).text.replace('\n', "").strip().strip('€').replace(',',
+                                                                                                                   '.'))
+            except AttributeError:
+                price_normal = None
+            description = soup.find("div", {"id": "wherei"}).findAll("a")
+            category_level = []
+            for _, des in enumerate(description):
+                category_level.append({"category{}".format(_): "{}".format(des.text.replace('\n', "").strip())})
+            category0 = None
+            category1 = None
+            category2 = None
+            category3 = None
+            category4 = None
+            for cat in category_level:
+                key, value = cat.popitem()
+                if key == 'category0':
+                    category0 = value
+                if key == 'category1':
+                    category1 = value
+                if key == 'category2':
+                    category2 = value
+                if key == 'category3':
+                    category3 = value
+                if key == 'category4':
+                    category4 = value
+            self.data_to_save.append({
+                "url": product_link,
+                "title": soup.find("div", {"id": "wherei"}).find("span", {"class": "active"}).text.replace('\n',
+                                                                                                           "").strip(),
+                "isbn": isbn,
+                "normal_price": price_normal,
+                "price": float(
+                    soup.find('span', {'class': 'price-value'}).text.replace('\n', "").strip().strip('€').replace(',',
+                                                                                                                  '.')),
+                "category0": category0,
+                "category1": category1,
+                "category2": category2,
+                "category3": category3,
+                "category4": category4
+            })
+
+        fieldnames = ["url", "title", "isbn", "normal_price", "price", "category0", "category1", "category2", "category3",
+                      "Category4"]
+
+        with open('products.csv', 'w') as csvfile:
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(self.data_to_save)
+
+
+if __name__ == "__main__":
+    funtastic_scraper = FuntasticScraper()
+    funtastic_scraper.load_website()
+    funtastic_scraper.get_products()
+    funtastic_scraper.get_products_data()
