@@ -143,7 +143,7 @@ class FuntasticScraper:
             })
 
         fieldnames = ["url", "title", "isbn", "normal_price", "price", "category0", "category1", "category2", "category3",
-                      "Category4"]
+                      "category4"]
 
         with open('products.csv', 'w') as csvfile:
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
